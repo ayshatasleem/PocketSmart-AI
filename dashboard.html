@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PocketSmartAI - Smart Budget Assistant</title>
+<style>
+*{box-sizing:border-box}body{font-family:Arial,sans-serif;margin:0;padding:30px;background:#f4f6f8;color:#1f2937}
+.container{max-width:1000px;margin:auto}h1{text-align:center;margin:10px 0 30px;font-size:38px}.subtitle{text-align:center;color:#6b7280;margin-top:-20px;margin-bottom:30px}
+.dashboard{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.card{background:#fff;padding:24px;border-radius:14px;box-shadow:0 3px 12px rgba(0,0,0,.08)}
+.card h2{margin:0 0 14px;font-size:22px}.value{font-size:30px;font-weight:700}.full{grid-column:1/-1}.advice{background:#fff}
+.form{display:grid;grid-template-columns:1fr 1fr auto;gap:10px}.form input{padding:12px;border:1px solid #d1d5db;border-radius:8px;font-size:15px}.btn{padding:12px 18px;border:0;border-radius:8px;background:#111827;color:white;cursor:pointer;font-weight:600}.btn:hover{opacity:.9}
+.message{margin:10px 0 0;color:#15803d}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}.list{margin:0;padding:0;list-style:none}.list li{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #eee}.muted{color:#6b7280}.status{font-weight:600}.danger{color:#b91c1c}.warning{color:#b45309}.good{color:#15803d}
+@media(max-width:700px){body{padding:15px}.dashboard,.grid2{grid-template-columns:1fr}.form{grid-template-columns:1fr}.full{grid-column:auto}}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>💰 PocketSmartAI</h1>
+<p class="subtitle">Your Smart Budget & Recommendation Assistant</p>
+
+<div class="dashboard">
+  <div class="card"><h2>Budget</h2><div class="value" id="budget">₹0</div></div>
+  <div class="card"><h2>Spent</h2><div class="value" id="spent">₹0</div></div>
+  <div class="card"><h2>Remaining</h2><div class="value" id="remaining">₹0</div></div>
+
+  <div class="card advice full">
+    <h2>🤖 AI Recommendation</h2>
+    <p id="advice" class="muted">Loading recommendation...</p>
+    <p id="status" class="status"></p>
+  </div>
+
+  <div class="card full">
+    <h2>➕ Add Expense</h2>
+    <div class="form">
+      <input type="text" id="categoryInput" placeholder="Category (e.g. Food)">
+      <input type="number" id="amountInput" placeholder="Amount" min="1" step="0.01">
+      <button class="btn" onclick="addExpense()">Add Expense</button>
+    </div>
+    <p id="expenseMessage" class="message"></p>
+  </div>
+
+  <div class="card full grid2">
+    <div>
+      <h2>📋 Expense History</h2>
+      <ul id="expenseList" class="list"><li class="muted">Loading...</li></ul>
+    </div>
+    <div>
+      <h2>📊 Spending by Category</h2>
+      <ul id="categoryList" class="list"><li class="muted">Loading...</li></ul>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+const money = n => "₹" + Number(n || 0).toLocaleString("en-IN", {maximumFractionDigits:2});
+
+async function loadDashboard(){
+  try{
+    const [budgetRes, adviceRes, statusRes, expensesRes, summaryRes] = await Promise.all([
+      fetch('/budget'), fetch('/recommendation'), fetch('/budget/status'), fetch('/expenses'), fetch('/expenses/summary')
+    ]);
+    const budget = await budgetRes.json();
+    const advice = await adviceRes.json();
+    const status = await statusRes.json();
+    const expenses = await expensesRes.json();
+    const summary = await summaryRes.json();
+
+    document.getElementById('budget').textContent = money(budget.total_budget);
+    document.getElementById('spent').textContent = money(budget.total_spent);
+    document.getElementById('remaining').textContent = money(budget.remaining_budget);
+    document.getElementById('advice').textContent = advice.recommendation || 'No recommendation available.';
+    document.getElementById('status').textContent = status.status;
+    document.getElementById('status').className = 'status ' + (status.total_spent >= status.total_budget ? 'danger' : status.total_spent >= status.total_budget*.8 ? 'warning' : 'good');
+
+    const expenseList = document.getElementById('expenseList');
+    expenseList.innerHTML = expenses.length ? expenses.slice().reverse().map(e => `<li><span>${escapeHtml(e.category || 'General')}</span><strong>${money(e.amount)}</strong></li>`).join('') : '<li class="muted">No expenses added yet.</li>';
+
+    const categoryList = document.getElementById('categoryList');
+    const entries = Object.entries(summary).sort((a,b)=>b[1]-a[1]);
+    categoryList.innerHTML = entries.length ? entries.map(([cat,total]) => `<li><span>${escapeHtml(cat)}</span><strong>${money(total)}</strong></li>`).join('') : '<li class="muted">No category data yet.</li>';
+  }catch(err){
+    console.error(err);
+    document.getElementById('advice').textContent='Unable to load dashboard data.';
+  }
+}
+
+async function addExpense(){
+  const category=document.getElementById('categoryInput').value.trim() || 'General';
+  const amount=Number(document.getElementById('amountInput').value);
+  const msg=document.getElementById('expenseMessage');
+  if(!amount || amount<=0){msg.textContent='Please enter a valid amount.';return;}
+  try{
+    const response=await fetch('/expenses',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({category,amount})});
+    if(!response.ok) throw new Error('Failed');
+    msg.textContent='Expense added successfully.';
+    document.getElementById('categoryInput').value='';
+    document.getElementById('amountInput').value='';
+    await loadDashboard();
+  }catch(err){msg.textContent='Unable to add expense.';}
+}
+function escapeHtml(s){return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+loadDashboard();
+</script>
+</body>
+</html>
